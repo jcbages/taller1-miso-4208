@@ -40,6 +40,7 @@
         }
         app.getSchedule(key, label);
         app.selectedTimetables.push({key: key, label: label});
+        app.saveSelectedTimetables();
         app.toggleAddDialog(false);
     });
 
@@ -113,6 +114,26 @@
     app.getSchedule = function (key, label) {
         var url = 'https://api-ratp.pierre-grimaud.fr/v3/schedules/' + key;
 
+        if ('caches' in window) {
+            /*
+             * Check if the service worker has already cached this city's weather
+             * data. If the service worker has the data, then display the cached
+             * data while the app fetches the latest data.
+            */
+            caches.match(url).then(function(response) {
+                if (response) {
+                    response.json().then(function (json) {
+                        var result = {};
+                        result.key = key;
+                        result.label = label;
+                        result.created = json._metadata.date;
+                        result.schedules = json.result.schedules;
+                        app.updateTimetableCard(result);
+                    });
+                }
+            });
+        }
+
         var request = new XMLHttpRequest();
         request.onreadystatechange = function () {
             if (request.readyState === XMLHttpRequest.DONE) {
@@ -141,6 +162,11 @@
             app.getSchedule(key);
         });
     };
+
+    app.saveSelectedTimetables = function () {
+        var selectedTimetables = JSON.stringify(app.selectedTimetables);
+        localStorage.selectedTimetables = selectedTimetables;
+    }
 
     /*
      * Fake timetable data that is presented when the user first uses the app,
@@ -180,8 +206,30 @@
      *   SimpleDB (https://gist.github.com/inexorabletash/c8069c042b734519680c)
      ************************************************************************/
 
-    app.getSchedule('metros/1/bastille/A', 'Bastille, Direction La Défense');
-    app.selectedTimetables = [
-        {key: initialStationTimetable.key, label: initialStationTimetable.label}
-    ];
+    app.selectedTimetables = localStorage.selectedTimetables;
+    if (app.selectedTimetables) {
+        console.log('Some timetables found, loading them now');
+
+        app.selectedTimetables = JSON.parse(app.selectedTimetables);
+        app.selectedTimetables.forEach(function (timetable) {
+            app.getSchedule(timetable.key, timetable.label);
+        });
+    } else {
+        console.log('First time, loading default');
+
+        app.getSchedule('metros/1/bastille/A', 'Bastille, Direction La Défense');
+        app.selectedTimetables = [
+            {key: initialStationTimetable.key, label: initialStationTimetable.label}
+        ];
+        app.saveSelectedTimetables();
+    }
+
+    // Service worker initialization code
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker
+        .register('./service-worker.js')
+        .then(function () {
+            console.log('Service Worker Registered :)');
+        });
+    }
 })();
